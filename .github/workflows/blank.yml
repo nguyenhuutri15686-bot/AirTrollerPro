@@ -13,45 +13,72 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Unzip source if needed
+      - name: Check files
         run: |
-          # Tìm và giải nén zip nếu có
+          echo "=== Files in repo ==="
+          ls -la
+          echo "=== Looking for zip ==="
+          ls *.zip 2>/dev/null || echo "No zip found"
+          echo "=== Looking for xcodeproj ==="
+          find . -name "*.xcodeproj" 2>/dev/null || echo "No xcodeproj found"
+          echo "=== Looking for Makefile ==="
+          find . -name "Makefile" 2>/dev/null || echo "No Makefile found"
+
+      - name: Unzip source
+        run: |
           for zip in *.zip; do
-            [ -f "$zip" ] && unzip -o "$zip" && break
+            if [ -f "$zip" ]; then
+              echo "Unzipping: $zip"
+              unzip -o "$zip"
+              break
+            fi
           done
 
-      - name: Find Xcode project
+      - name: Check after unzip
         run: |
-          # Tìm file .xcodeproj
-          proj=$(find . -name "*.xcodeproj" -maxdepth 2 | head -1)
-          echo "PROJECT=$proj" >> $GITHUB_ENV
-          echo "Found: $proj"
+          echo "=== Files after unzip ==="
+          ls -la
+          find . -name "*.xcodeproj" -o -name "Makefile" | head -5
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
 
-      - name: Build IPA (No Code Sign)
+      - name: Build with Xcode
         run: |
-          cd "$(dirname "$PROJECT")" || cd .
-          xcodebuild -project "$(basename "$PROJECT")" \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath build \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=NO \
-            ARCHS=arm64
+          proj=$(find . -name "*.xcodeproj" | head -1)
+          if [ -n "$proj" ]; then
+            echo "Found project: $proj"
+            dir=$(dirname "$proj")
+            base=$(basename "$proj")
+            cd "$dir"
+            xcodebuild -project "$base" \
+              -configuration Release \
+              -sdk iphoneos \
+              -derivedDataPath build \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              ONLY_ACTIVE_ARCH=NO \
+              ARCHS=arm64
+          else
+            echo "No Xcode project found!"
+            exit 1
+          fi
 
       - name: Package to .tipa
         run: |
           rm -rf Payload
           mkdir Payload
-          app_path=$(find build -name "*.app" -type d | head -1)
-          cp -R "$app_path" Payload/
-          zip -r app.tipa Payload
+          app_path=$(find . -name "*.app" -type d | grep -v "Payload" | head -1)
+          if [ -n "$app_path" ]; then
+            cp -R "$app_path" Payload/
+            zip -r app.tipa Payload
+          else
+            echo "No .app found!"
+            exit 1
+          fi
 
       - name: Upload .tipa
         uses: actions/upload-artifact@v4
