@@ -1,8 +1,6 @@
 name: Build .tipa
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
@@ -13,76 +11,49 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Check files
+      - name: Find and process files
         run: |
-          echo "=== Files in repo ==="
+          echo "=== All files ==="
           ls -la
-          echo "=== Looking for zip ==="
-          ls *.zip 2>/dev/null || echo "No zip found"
-          echo "=== Looking for xcodeproj ==="
-          find . -name "*.xcodeproj" 2>/dev/null || echo "No xcodeproj found"
-          echo "=== Looking for Makefile ==="
-          find . -name "Makefile" 2>/dev/null || echo "No Makefile found"
+          find . -maxdepth 2 -type f | head -20
 
-      - name: Unzip source
+      - name: Unzip if needed
         run: |
           for zip in *.zip; do
-            if [ -f "$zip" ]; then
-              echo "Unzipping: $zip"
-              unzip -o "$zip"
-              break
-            fi
+            [ -f "$zip" ] && echo "Unzipping $zip" && unzip -o "$zip" && break
           done
-
-      - name: Check after unzip
-        run: |
-          echo "=== Files after unzip ==="
+          echo "=== After unzip ==="
           ls -la
-          find . -name "*.xcodeproj" -o -name "Makefile" | head -5
 
-      - name: Setup Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: Build with Xcode
+      - name: Create TIPA
         run: |
-          proj=$(find . -name "*.xcodeproj" | head -1)
-          if [ -n "$proj" ]; then
-            echo "Found project: $proj"
-            dir=$(dirname "$proj")
-            base=$(basename "$proj")
-            cd "$dir"
-            xcodebuild -project "$base" \
-              -configuration Release \
-              -sdk iphoneos \
-              -derivedDataPath build \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              ONLY_ACTIVE_ARCH=NO \
-              ARCHS=arm64
-          else
-            echo "No Xcode project found!"
-            exit 1
+          # Nếu có .ipa sẵn → đổi tên
+          ipa=$(find . -name "*.ipa" | head -1)
+          if [ -n "$ipa" ]; then
+            echo "Found IPA: $ipa"
+            cp "$ipa" ./app.tipa
+            echo "Created app.tipa"
+            ls -lh app.tipa
+            exit 0
           fi
-
-      - name: Package to .tipa
-        run: |
-          rm -rf Payload
-          mkdir Payload
-          app_path=$(find . -name "*.app" -type d | grep -v "Payload" | head -1)
-          if [ -n "$app_path" ]; then
-            cp -R "$app_path" Payload/
+          
+          # Nếu có .app → đóng gói
+          app=$(find . -name "*.app" -type d | head -1)
+          if [ -n "$app" ]; then
+            echo "Found APP: $app"
+            mkdir -p Payload
+            cp -R "$app" Payload/
             zip -r app.tipa Payload
-          else
-            echo "No .app found!"
-            exit 1
+            ls -lh app.tipa
+            exit 0
           fi
+          
+          echo "No IPA or APP found!"
+          exit 1
 
-      - name: Upload .tipa
+      - name: Upload TIPA
         uses: actions/upload-artifact@v4
         with:
           name: app-tipa
           path: app.tipa
-          retention-days: 30
+          if-no-files-found: error
